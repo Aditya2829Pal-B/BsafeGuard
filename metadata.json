@@ -1,0 +1,12 @@
+{
+  "name": "BsafeGuard",
+  "description": "A women's safety application with emergency SOS multi-tap triggers, location sharing, media recording, and authorized contact notifications.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
