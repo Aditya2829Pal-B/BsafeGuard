@@ -23,4 +23,5 @@ export interface UserProfile {
   height?: string;
   weight?: string;
   dailySteps?: string;
+  stepHistory?: { day: string; steps: number }[];
 }

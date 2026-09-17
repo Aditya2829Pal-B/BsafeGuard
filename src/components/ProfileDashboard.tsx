@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { User, Activity, Save } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { User, Activity, Save, TrendingUp } from 'lucide-react';
 import { UserProfile } from '../types';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ProfileDashboardProps {
   profile: UserProfile | null;
@@ -18,10 +19,31 @@ export function ProfileDashboard({ profile, setProfile }: ProfileDashboardProps)
     medications: '',
     height: '',
     weight: '',
-    dailySteps: ''
+    dailySteps: '',
+    stepHistory: []
   });
 
   const [isSaved, setIsSaved] = useState(false);
+
+  // Generate a mock history based on the daily goal for visualization purposes
+  // In a real app, this would come from an API or health kit integration
+  const chartData = useMemo(() => {
+    if (formData.stepHistory && formData.stepHistory.length > 0) {
+      return formData.stepHistory;
+    }
+    
+    const goal = parseInt(formData.dailySteps?.replace(/\D/g, '') || '10000', 10);
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const today = new Date().getDay();
+    
+    // Generate deterministic mock data based on the goal so it doesn't flash randomly every render
+    return Array.from({ length: 7 }).map((_, i) => {
+      const dayIndex = (today - 6 + i + 7) % 7;
+      const variations = [0.8, 1.1, 0.9, 1.2, 0.7, 1.0, 0.85];
+      const steps = Math.floor(goal * variations[i]);
+      return { day: days[dayIndex], steps };
+    });
+  }, [formData.stepHistory, formData.dailySteps]);
 
   useEffect(() => {
     if (profile) {
@@ -35,8 +57,13 @@ export function ProfileDashboard({ profile, setProfile }: ProfileDashboardProps)
   };
 
   const handleSave = () => {
-    setProfile(formData);
-    localStorage.setItem('bsafeguard_profile', JSON.stringify(formData));
+    // Save generated history if empty so it persists
+    const dataToSave = {
+      ...formData,
+      stepHistory: formData.stepHistory?.length ? formData.stepHistory : chartData
+    };
+    setProfile(dataToSave);
+    localStorage.setItem('bsafeguard_profile', JSON.stringify(dataToSave));
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -163,7 +190,51 @@ export function ProfileDashboard({ profile, setProfile }: ProfileDashboardProps)
             </div>
           </div>
         </div>
+      </div>
 
+      {/* Activity Chart */}
+      <div className="p-6 border-t border-neutral-100 bg-neutral-50/30">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-medium text-neutral-800 flex items-center">
+            <TrendingUp size={18} className="mr-2 text-neutral-500" />
+            7-Day Activity Trends
+          </h3>
+          <span className="text-xs font-medium bg-neutral-100 text-neutral-600 px-3 py-1 rounded-full">
+            Steps
+          </span>
+        </div>
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E5" />
+              <XAxis 
+                dataKey="day" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 12, fill: '#737373' }} 
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 12, fill: '#737373' }}
+              />
+              <Tooltip 
+                cursor={{ fill: '#F5F5F5' }}
+                contentStyle={{ borderRadius: '12px', border: '1px solid #E5E5E5', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}
+                labelStyle={{ fontWeight: '600', color: '#171717', marginBottom: '4px' }}
+                itemStyle={{ color: '#DC2626', fontWeight: '500' }}
+              />
+              <Bar 
+                dataKey="steps" 
+                fill="#DC2626" 
+                radius={[4, 4, 0, 0]} 
+                maxBarSize={40}
+                animationDuration={1000}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );

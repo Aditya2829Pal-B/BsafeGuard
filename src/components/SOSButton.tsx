@@ -14,9 +14,13 @@ export function SOSButton({ accessToken, selectedContacts, userProfile, onLogEve
   const [isRecording, setIsRecording] = useState(false);
   const [locationStr, setLocationStr] = useState<string>('');
   const [sosSent, setSosSent] = useState(false);
+  const [isConcluding, setIsConcluding] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+  const eventStartTimeRef = useRef<string | null>(null);
 
   // Handle multi-tap logic
   useEffect(() => {
@@ -72,6 +76,10 @@ export function SOSButton({ accessToken, selectedContacts, userProfile, onLogEve
 
   const startRecordingAndLocation = async () => {
     try {
+      if (!eventStartTimeRef.current) {
+        eventStartTimeRef.current = new Date().toLocaleString();
+      }
+
       // Location
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -90,9 +98,19 @@ export function SOSButton({ accessToken, selectedContacts, userProfile, onLogEve
         videoRef.current.srcObject = stream;
         videoRef.current.play();
       }
+      
+      recordedChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
+        }
+      };
+      
+      mediaRecorder.start(1000); // chunk every 1 second
       setIsRecording(true);
-      // In a full production app, MediaRecorder would chunk data and upload to a server.
-      // For this implementation, we just activate the streams as requested.
     } catch (e) {
       console.error("Failed to start media", e);
     }
@@ -159,6 +177,83 @@ export function SOSButton({ accessToken, selectedContacts, userProfile, onLogEve
     window.location.href = "tel:911";
   };
 
+  const concludeEvent = async () => {
+    if (!accessToken) {
+       alert("Please authorize your Google account first to send reports.");
+       return;
+    }
+    
+    setIsConcluding(true);
+    
+    // Stop recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    
+    // Wait a brief moment to ensure final chunks are processed
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    let mediaBase64 = '';
+    if (recordedChunksRef.current.length > 0) {
+      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      mediaBase64 = await new Promise<string>((resolve) => {
+         const reader = new FileReader();
+         reader.onloadend = () => resolve(reader.result as string);
+         reader.readAsDataURL(blob);
+      });
+    }
+
+    try {
+      const emails = selectedContacts
+        .map(c => c.emailAddresses?.[0]?.value)
+        .filter(Boolean) as string[];
+
+      const [lat, lng] = locationStr.split(',');
+
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          emails,
+          location: { lat, lng },
+          startTime: eventStartTimeRef.current,
+          endTime: new Date().toLocaleString(),
+          profile: userProfile,
+          mediaBase64
+        })
+      });
+
+      if (res.ok) {
+        alert("Event Concluded. Summary report sent successfully to emergency contacts.");
+        onLogEvent({
+          id: Date.now().toString(),
+          timestamp: new Date().toLocaleString(),
+          actions: ["Event Concluded & Report Sent"],
+          location: locationStr
+        });
+      } else {
+        const data = await res.json();
+        alert(`Failed to send report: ${data.error}`);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to send report email.");
+    } finally {
+      // Clean up streams
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      setIsRecording(false);
+      setLocationStr('');
+      setIsConcluding(false);
+      eventStartTimeRef.current = null;
+      recordedChunksRef.current = [];
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center space-y-8 w-full max-w-md mx-auto">
       
@@ -208,6 +303,16 @@ export function SOSButton({ accessToken, selectedContacts, userProfile, onLogEve
       <div className={`overflow-hidden rounded-lg shadow-lg border border-neutral-200 transition-all ${isRecording ? 'h-48 w-full opacity-100' : 'h-0 opacity-0'}`}>
          <video ref={videoRef} className="w-full h-full object-cover bg-black" muted playsInline />
       </div>
+
+      {isRecording && (
+        <button 
+          onClick={concludeEvent}
+          disabled={isConcluding}
+          className="w-full mt-4 bg-neutral-900 text-white font-semibold py-3 rounded-xl shadow-sm hover:bg-neutral-800 transition-colors disabled:opacity-50"
+        >
+          {isConcluding ? 'Sending Report...' : 'Conclude SOS & Send Report'}
+        </button>
+      )}
 
     </div>
   );

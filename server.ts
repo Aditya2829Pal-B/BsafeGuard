@@ -81,6 +81,95 @@ Please check on me immediately.
     }
   });
 
+  // API to send a concluding report with media attachment
+  app.post("/api/send-report", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "No auth token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    const { emails, location, startTime, endTime, profile, mediaBase64 } = req.body;
+    
+    if (!emails || emails.length === 0) {
+      return res.status(400).json({ error: "No recipient emails provided" });
+    }
+
+    try {
+      const oauth2Client = new google.auth.OAuth2();
+      oauth2Client.setCredentials({ access_token: token });
+      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+      const mapLink = location ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}` : 'Location unavailable';
+      
+      let profileText = '';
+      if (profile) {
+        profileText = `\nUSER PROFILE & MEDICAL INFO:
+Name: ${profile.fullName || 'Not provided'}
+Phone: ${profile.phone || 'Not provided'}
+Blood Type: ${profile.bloodType || 'Not provided'}
+Allergies: ${profile.allergies || 'None listed'}
+`;
+      }
+
+      const messageText = `SOS EVENT CONCLUDED - SUMMARY REPORT
+
+The user has concluded their SOS event. Here is the summary:
+
+Start Time: ${startTime}
+End Time: ${endTime}
+Last Known Location: ${mapLink}
+${profileText}
+
+A media recording of the event is attached if it was successfully captured.
+`;
+
+      const boundary = "foo_bar_baz_boundary_" + Date.now();
+
+      for (const email of emails) {
+        let str = [
+          `To: ${email}`,
+          "Subject: SOS EVENT CONCLUDED - Summary Report",
+          "MIME-Version: 1.0",
+          `Content-Type: multipart/mixed; boundary="${boundary}"`,
+          "",
+          `--${boundary}`,
+          "Content-Type: text/plain; charset=\"UTF-8\"",
+          "",
+          messageText,
+        ].join("\n");
+
+        if (mediaBase64) {
+          str += [
+            "",
+            `--${boundary}`,
+            "Content-Type: video/webm; name=\"sos_recording.webm\"",
+            "Content-Disposition: attachment; filename=\"sos_recording.webm\"",
+            "Content-Transfer-Encoding: base64",
+            "",
+            mediaBase64.replace(/^data:.*,/, ''),
+            ""
+          ].join("\n");
+        }
+        
+        str += `--${boundary}--\n`;
+
+        const encodedMessage = Buffer.from(str).toString("base64").replace(/\+/g, '-').replace(/\//g, '_');
+        
+        await gmail.users.messages.send({
+          userId: "me",
+          requestBody: {
+            raw: encodedMessage
+          }
+        });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('Error sending report email:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // API for safety chatbot powered by Gemini
   app.post("/api/chat", async (req, res) => {
     try {
